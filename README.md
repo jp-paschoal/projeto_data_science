@@ -1,121 +1,117 @@
-# Previsão de Atrasos de Entrega (Olist)
+# Previsão de atrasos de entrega (Olist)
 
-Desafio técnico de Ciência de Dados aplicado ao e-commerce brasileiro.
+Projeto do desafio técnico de Data Science. O objetivo é prever, na hora da compra, se um pedido vai ser entregue depois da data prometida ao cliente, usando o dataset público da Olist (cerca de 100 mil pedidos entre 2016 e 2018).
 
-## Sobre o projeto
+## Resumo
 
-O objetivo deste projeto é prever, **no exato momento da compra (checkout)**, a probabilidade de um pedido ser entregue após a data estimada informada ao cliente, utilizando o dataset público da Olist (\~100 mil pedidos realizados entre 2016 e 2018).
+- Base final: 95.699 pedidos entregues, de janeiro de 2017 a agosto de 2018.
+- Taxa de atraso: 6,8% (comparando só o dia da entrega com o dia estimado).
+- Modelo final: LightGBM sem as colunas de estado, com PR-AUC de 0,071 no teste (um chute aleatório teria 0,035).
+- Uso prático: marcando os 10% de pedidos com maior risco, o modelo pega 20,6% dos atrasos reais, mais que o dobro de um sorteio.
+- Principal limite: o padrão de atraso por estado mudou entre o período de treino e o de teste.
 
-Antecipar pedidos com alto risco de atraso permite que as equipes de logística, atendimento e os próprios lojistas (_sellers_) atuem preventivamente — adicionando folga dinâmica no prazo exibido no checkout, priorizando a expedição do pacote ou enviando comunicações proativas ao consumidor.
+## Como baixar os dados
 
-Destaques metodológicos do projeto:
+Os arquivos CSV brutos não estão no repositório.
 
-- **Prevenção estrita de vazamento de dados (_Data Leakage_):** utilização exclusiva de variáveis conhecidas até o segundo da compra, descartando datas posteriores (aprovação, postagem na transportadora, entrega real e avaliações).
+1. Baixe o dataset no Kaggle: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+2. Extraia os 9 arquivos `.csv` numa pasta chamada `data/` na raiz do projeto.
 
-- **Engenharia de atributos (_Feature Engineering_):** cálculo da distância física entre CEPs via fórmula de Haversine (`distancia_km`), criação do índice de folga logística (`dias_por_100km`) e construção do histórico temporal de atrasos de cada vendedor (`vend_hist_taxa`) com suavização bayesiana e busca binária estritamente no passado.
+O notebook usa a pasta do Kaggle quando roda lá e a pasta `data/` quando roda no computador.
 
-- **Validação temporal e desbalanceamento:** divisão cronológica (80% passado para treino, 20% futuro para teste) para respeitar a sazonalidade e mudanças de regime da operação, avaliando os modelos por **PR-AUC** e **ROC-AUC** devido à raridade da classe positiva (6,77% geral e 3,5% no período de teste).
+## Como executar
+
+Rodei o projeto no Kaggle. Para rodar localmente, use Python 3.10 ou mais novo:
+
+```
+python -m venv venv
+venv\Scripts\activate        # Windows (no Linux ou macOS: source venv/bin/activate)
+pip install -r requirements.txt
+jupyter notebook projeto_olist.ipynb
+```
+
+O cálculo do histórico do vendedor tem um laço e pode levar alguns minutos.
 
 ## Estrutura do repositório
 
 ```
 .
-├── data/                        # Arquivos CSV do Kaggle (ignorados no Git via .gitignore)
-├── projeto_olist.ipynb
+├── data/                  # CSVs do Kaggle (fora do Git)
+├── projeto_olist.ipynb    # notebook com todo o projeto
 ├── requirements.txt
 ├── README.md
 └── .gitignore
-
 ```
 
 ## Roteiro do notebook
 
-1. **Os Dados:** carregamento das 9 tabelas relacionais da Olist e definição da granularidade por pedido.
+1. Os dados: carga das 9 tabelas e definição de uma linha por pedido.
+2. Qualidade dos dados e criação do target.
+3. Exploração dos dados: 9 hipóteses sobre o que causa atraso (prazo prometido, estado, distância, prazo dentro de cada faixa de distância, folga do prazo, época do ano, peso, frete em relação ao preço e frete em reais), com a limpeza de coordenadas erradas e de 2016.
+4. Preparação da base: escolha das variáveis conhecidas na compra e divisão em treino e teste no tempo.
+5. Modelagem: regressão logística, LightGBM e variações, mais a hipótese 10 (histórico do vendedor) e o ajuste de parâmetros.
+6. Avaliação do modelo final: ganho prático por faixa de risco, importância das variáveis e análise de erros por estado.
+7. Conclusão e uso na prática.
 
-2. **Qualidade dos Dados e Criação do Target:** filtro de pedidos entregues (`delivered`), tratamento de nulos e construção do target `atrasou` comparando apenas o dia (`.dt.normalize()`) para corrigir a distorção do horário `00:00:00` na data estimada.
+## Principais decisões
 
-3. **Exploração dos Dados (EDA):** investigação de 9 hipóteses de negócio (prazo prometido, UF do cliente/vendedor, distância física, cruzamento prazo vs. distância, folga em dias por 100 km, sazonalidade mensal, peso/volume e frete), incluindo remoção dos dados esparsos de 2016 e limpeza de outliers geográficos (> 4.500 km) e cadastrais.
+- Só entram pedidos entregues. Os outros 2.963 (enviados, cancelados etc.) não têm data de entrega, então não dá para saber se atrasaram. Isso pode fazer a taxa de atraso parecer menor do que é, já que pedidos ainda a caminho podem estar atrasados.
+- Target por dia. O enunciado define atraso pela diferença entre as datas completas, mas a data estimada vem sempre às 00:00:00. Com a hora, 8,11% dos pedidos seriam atrasados, e 1.292 deles chegaram no próprio dia prometido. Comparando só o dia, são 6,77%.
+- Sem vazamento de dados. Só entram variáveis conhecidas na compra. Datas de aprovação, envio e entrega e avaliações ficam de fora, e o histórico do vendedor usa só entregas já concluídas antes de cada compra.
+- Divisão no tempo. Os 80% dos pedidos mais antigos (até 27/05/2018) são o treino e os 20% mais recentes são o teste.
+- Métricas. Como poucos pedidos atrasam, uso PR-AUC (principal) e ROC-AUC, além da tabela de ganho por faixa de risco.
 
-4. **Preparação da Base para o Modelo:** seleção de features livres de vazamento e split temporal (corte em `27/05/2018`).
+Limpeza da base:
 
-5. **Modelagem:** comparação entre Baseline Aleatório, Regressão Logística e variações do LightGBM (testando impacto da sazonalidade, poda de complexidade das árvores, adição do histórico do vendedor e remoção das siglas de UF para ganho de estabilidade).
+| Etapa | Removidos | Base |
+|---|---|---|
+| Todos os pedidos | | 99.441 |
+| Só status entregue | 2.963 | 96.478 |
+| Entregue sem data de entrega | 8 | 96.470 |
+| CEP sem coordenadas | 478 | 95.992 |
+| Distâncias impossíveis (acima de 4.500 km) | 4 | 95.988 |
+| Ano de 2016 (poucos pedidos) | 267 | 95.721 |
+| Peso ou volume igual a zero | 22 | 95.699 |
 
-6. **Avaliação do Modelo Final:** análise prática de negócio via Tabela de _Lift_ / Curva de Ganho, importância das variáveis (_Feature Importance_ por ganho) e diagnóstico de erros frente à mudança de regime logístico entre treino e teste (_Concept Drift_).
+## Resultados
 
-7. **Conclusão e Aplicação Prática:** plano de ação no checkout, limitações do estudo e recomendações de próximos passos.
+| Modelo | PR-AUC | ROC-AUC |
+|---|---|---|
+| Chute aleatório | 0,035 | 0,500 |
+| Regressão logística | 0,069 | 0,678 |
+| LightGBM | 0,067 | 0,702 |
+| LightGBM sem o mês | 0,055 | 0,606 |
+| LightGBM mais simples, sem o mês | 0,061 | 0,643 |
+| LightGBM com histórico do vendedor | 0,065 | 0,669 |
+| LightGBM sem os estados (modelo final) | 0,071 | 0,699 |
+| LightGBM sem os estados, com ajuste de parâmetros | 0,073 | 0,690 |
 
-## Modelos utilizados e resultados
+O ajuste de parâmetros (com validação que respeita o tempo) não trouxe ganho relevante, então mantive o modelo sem ajuste como final.
 
-| Modelo                                  | PR-AUC    | ROC-AUC   | Observação                                               |
-| --------------------------------------- | --------- | --------- | -------------------------------------------------------- |
-| **Chute aleatório (Baseline)**          | 0,035     | 0,500     | Taxa base de atrasos no período de teste (3,5%)          |
-| **Regressão Logística**                 | 0,069     | 0,678     | Baseline linear com `StandardScaler` e pesos balanceados |
-| **LightGBM (padrão)**                   | 0,067     | 0,702     | Numéricas + UF do cliente e do vendedor                  |
-| **LightGBM (sem mês)**                  | 0,055     | 0,606     | Teste de remoção da sazonalidade                         |
-| **LightGBM (simples, sem mês)**         | 0,061     | 0,643     | Árvores rasas (`num_leaves=8`, `min_child_samples=100`)  |
-| **LightGBM + histórico do vendedor**    | 0,065     | 0,669     | Inclusão de `vend_hist_taxa` e `vend_hist_n`             |
-| **LightGBM sem estados (Modelo Final)** | **0,071** | **0,699** | **Melhor PR-AUC e maior estabilidade regional**          |
+Ganho prático no teste (19.140 pedidos, 665 atrasos):
 
-- **Ganho operacional (_Lift_):** ao priorizar os **10% de pedidos com maior score de risco**, o modelo final captura **20,6% de todos os atrasos reais** (**2,06x melhor** que uma seleção aleatória). Expandindo para o **top 20%**, capturamos **38,9%** dos atrasos; no **top 30%**, antecipamos **56,5%** de todos os problemas de entrega.
+| Pedidos marcados (maior risco) | Atrasos pegos | Vezes melhor que sortear |
+|---|---|---|
+| 5% | 12,3% | 2,47 |
+| 10% | 20,6% | 2,06 |
+| 20% | 38,9% | 1,95 |
+| 30% | 56,5% | 1,88 |
 
-## Como executar o projeto localmente
+## Limitações
 
-### 1. Obtenção dos dados (Kaggle)
+- O padrão de atraso mudou entre treino e teste (7,6% contra 3,5%), e estados como RJ e BA caíram bastante.
+- São só 20 meses de dados, pouco para separar o que se repete todo ano do que foi pontual.
+- O modelo só enxerga o que existe na hora da compra. Problemas depois disso (demora do vendedor, transportadora) ficam de fora.
+- Os pedidos do fim do treino entram com o resultado final, mesmo quando chegaram depois do corte.
+- Fiz uma única divisão de treino e teste.
 
-Por boas práticas de versionamento, os arquivos CSV brutos não estão incluídos neste repositório.
+## Uso de ferramentas e IA
 
-1. Baixe o dataset oficial no Kaggle: [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
+Usei o Claude (Anthropic) e o Gemini (Google) como apoio durante o projeto, para tirar dúvidas, revisar código e organizar os textos. Também consultei outra assistente de IA para revisar partes do código. As hipóteses, as decisões e as conclusões foram revisadas por mim.
 
-2. Extraia os 9 arquivos `.csv` dentro de uma pasta chamada `data/` na raiz do projeto (o notebook detecta automaticamente tanto o ambiente do Kaggle quanto a pasta local `data/`).
+Bibliotecas: Python, pandas, NumPy, Matplotlib, Seaborn, scikit-learn e LightGBM. Ambiente: Kaggle Notebooks.
 
-### 2. Configuração do ambiente e instalação de dependências
+## Referências
 
-No terminal, crie e ative um ambiente virtual (`venv`) e instale os pacotes necessários:
-
-- **Windows (Cmd):**
-
-  ```
-  python -m venv venv
-  venv\Scripts\activate
-  pip install -r requirements.txt
-
-  ```
-
-- **Windows (Git Bash):**
-
-  ```
-  python -m venv venv
-  source venv/Scripts/activate
-  pip install -r requirements.txt
-
-  ```
-
-- **Linux / macOS:**
-
-  ```
-  python3 -m venv venv
-  source venv/bin/activate
-  pip install -r requirements.txt
-
-  ```
-
-### 3. Execução do Notebook
-
-Abra o arquivo `projeto_olist.ipynb` no VS Code, JupyterLab ou Jupyter Notebook:
-
-```
-jupyter notebook projeto_olist.ipynb
-
-```
-
-## Tecnologias utilizadas
-
-- **Python 3**
-
-- **Pandas / NumPy** — manipulação de dados, agregações e cálculos vetoriais
-
-- **Matplotlib / Seaborn** — visualização de dados, mapas de calor e curva de ganho
-
-- **Scikit-learn** — pré-processamento, baseline linear e métricas de avaliação (`PR-AUC`, `ROC-AUC`)
-
-- **LightGBM** — modelo principal de _Gradient Boosting_
+- Olist. Brazilian E-Commerce Public Dataset by Olist. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+- CRISP-DM, roteiro de projetos de dados, como guia da organização do notebook.
